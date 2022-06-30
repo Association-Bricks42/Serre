@@ -1,0 +1,659 @@
+/******************************
+ * Declare required libraries *
+ ******************************/
+//Library for DS18b20 sensors... 
+#include <OneWire.h>
+#include <DallasTemperature.h>
+//Library for SHT3 sensors...
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_SHT31.h>
+//Library for Web, files system and network...
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
+#include <EEPROM.h>
+#include <time.h>
+//Libraries for MQTT communication...
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+/********************************
+ * End of libraries declaration *
+ ********************************/
+
+/*************
+ * MQTT setup file*
+ *************/
+File mqttIni;
+const char* mqttIniFile = "/mqtt.ini";
+String mqttBroker,mqttTopics,mqttLogin,mqttPass,sampleFreq;
+/********************
+ * end of MQTT setup file*
+ ********************/
+
+/*************************************
+ * Access Point configuration network*
+ *************************************/
+IPAddress local_IP(192,168,4,22);
+IPAddress gateway(192,168,4,22);
+IPAddress subnet(255,255,255,0);
+ bool wifi_state = true;
+/********************************************
+ * End of Acces Point configuration network *
+ ********************************************/
+
+ /******************
+ * MQTT parameters *
+ *******************/
+#define Iot_name "gcap01"
+WiFiClient espClient;
+PubSubClient client(espClient);
+const char* mqttServer = "";
+const char* mqttRegister = "";
+const int mqttPort = 1883;
+const char* mqttUser = "";
+const char* mqttPassword = "";
+/**************************
+ * End of MQTT parameters *
+ **************************/
+
+ /****************************
+ * Declare pin in input mode *
+ ****************************/
+//Variables to collect physical measures...
+#define factory_reset 2 //BP for factory reset
+#define led_reset 0    //LED for factory reset
+#define led_error 4     //LED for errors
+/************************************
+ * End of Declare pin in input mode *
+ ************************************/
+
+/*********************************
+ * Declare web server on port 80 *
+ *********************************/
+AsyncWebServer server(80);
+/****************************************
+ * End of Declare web server on port 80 *
+ ****************************************/ 
+
+/*************************************
+ * Parameter for AP setting web page *
+ *************************************/
+const char* PARAM_INPUT_1 = "AP-PASSWORD";
+const char* PARAM_INPUT_2 = "AP-SSID";
+const char* PARAM_INPUT_3 = "WIFI-SSID";
+const char* PARAM_INPUT_4 = "WIFI-PWD";
+const char* PARAM_INPUT_5 = "M-BROKER";
+const char* PARAM_INPUT_6 = "S-FREQ";
+/********************************************
+ * End of Parameter for AP setting web page *
+ ********************************************/
+
+/*********************
+ * Intialize sensors *
+ *********************/
+ //initialize DS18b20 sensor...
+#define ONE_WIRE_BUS 15
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature DSsensors(&oneWire);
+//initialize soil humidity sensor...
+Adafruit_SHT31 SoilSensor = Adafruit_SHT31();
+//initialize light sensor...
+#define lightsensor_pin 33
+/****************************
+ * End of Intialize sensors *
+ ****************************/
+ 
+/****************************
+ * Declare global variables *
+ ****************************/
+//Variables to collect physical measures...
+float ta,ts,hs,lr;
+//Varibale for timestamp...
+time_t now;
+/***********************************
+ * End of Declare global variables *
+ ***********************************/
+ 
+
+/********************** 
+ *  Declare functions *
+ **********************/
+//Function to display physical measures on root page...
+String processor(const String& var){
+  Serial.println(var);
+  
+//Get ambiant temperature from DS18b20...
+  if(var == "TA"){
+    Serial.println("Ta: " + String(ta));     
+    return String(ta);
+  }
+
+  //Get soil humidity from SHT31...
+  if(var == "HS"){
+    Serial.println("Hs: " + String(hs)); 
+    return String(hs);
+  }
+  
+  //Get soil temperature from SHT31...
+  if (var == "TS"){
+  Serial.println("Ts: " + String(ts)); 
+  return String(ts);   
+  }  
+
+  //Get light rate...
+  if (var == "LR"){
+  Serial.println("Lr: " + String(lr)); 
+  return String(lr);   
+  }  
+  return String();
+}
+
+//Function to get new Access Point parameters from APNetwork page...
+String ap_processor(const String& var){
+  Serial.println(var) ;
+    
+    //Get SSID of accesspoint...
+    if(var == "APSSID"){
+      return String (WiFi.softAPSSID()) ;
+    }
+
+    //Get IP address of access point...
+    if (var == "APIP"){
+    return String(WiFi.softAPIP().toString());    
+  }
+  return String() ;
+}
+
+//Function to get Wifi settings from wifi settings page...
+String wifi_processor(const String& var){
+  Serial.println(var) ;
+        
+    //Get SSIS of WIFI router...
+    if(var == "WIFISSID"){
+      String ssid_wifi = EEPROM.readString(250);
+      return String (ssid_wifi) ;
+    }
+
+    //Get current state of wifi connection...
+    if (var == "WIFISTATE" && WiFi.status() != WL_CONNECTED){
+      return String ("WIFI disconnected") ; 
+    }    
+    else if (var == "WIFISTATE" && WiFi.status() == WL_CONNECTED){
+      return String ("WIFI connected") ; 
+    }
+
+    //Get current IP address of WIFI router...
+    if (var == "WIFIIP"){
+      return String (WiFi.localIP().toString());
+    }    
+  return String() ;
+}
+
+//Function to get MQTT parameters from Mqtt page...
+String Mqtt_processor(const String& var){
+  Serial.println(var) ;
+    
+    //Get mqtt broker...
+    if(var == "MBROKER"){
+      return String (mqttBroker) ;
+    }
+
+    //Get mqtt topic...
+    if (var == "MTOPIC"){
+    return String(mqttTopics);    
+  }
+
+  //Get sample frequency ...
+    if (var == "SFREQ"){
+    return String(sampleFreq);    
+  }
+  
+  return String() ;
+}
+
+//Function to configure Access Point...
+void Setup_AP(){
+  //Get AP credentials from EEPROM...  
+  String ssid_ap = EEPROM.readString(100);  
+  String password_ap = EEPROM.readString(200);  
+
+  //Set access point for the current IOT device...
+  Serial.print("Setting soft-AP ... ");
+  Serial.println(WiFi.softAP(ssid_ap.c_str(),password_ap.c_str()) ? "Ready" : "Failed!");
+  delay(100);
+  Serial.print("Setting soft-AP configuration ... ");
+  Serial.println(WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");    
+  Serial.print("Soft-AP SSID = ");
+  Serial.println(WiFi.softAPSSID());
+  Serial.print("Soft-AP IP address = ");
+  Serial.println(WiFi.softAPIP());   
+}
+
+//Function to setup WIFI router connection...
+void Setup_WIFI(){
+  
+  //Get WIFI credentials from EEPROM...  
+  String ssid_wifi = EEPROM.readString(250);  
+  String pwd_wifi = EEPROM.readString(285); 
+  int retry = 0 ;
+
+  //Set Wifi router connection...
+  if (ssid_wifi == "NOWIFI"){
+    Serial.println("NO WIFI Configured");
+  }
+  else{
+    Serial.println("WIFI configured");    
+    WiFi.begin(ssid_wifi.c_str(), pwd_wifi.c_str());
+    Serial.println("\n[*] Connecting to WiFi Network");
+    while(WiFi.status() != WL_CONNECTED && retry<10)
+    {
+        Serial.print(".");
+        delay(1000);
+        retry++ ;
+    }
+
+    if (WiFi.status() != WL_CONNECTED){
+      Serial.println("WIFI connection error!");
+      digitalWrite(led_reset,HIGH);
+    }
+    else{
+      Serial.print("\n[+] Connected to the WiFi network with local IP : ");
+      Serial.println(WiFi.localIP()); 
+      digitalWrite(led_reset,LOW); 
+    }   
+    
+  }  
+}
+
+//Function to restore original AP parameters...
+void restore_AP(){
+  String ssid_ap = "AP";
+  String password_ap = "12345678";
+  char ssid [9];
+  char pwd[15];
+  ssid_ap.toCharArray(ssid,9);
+  password_ap.toCharArray(pwd,15);
+  EEPROM.writeString(100,ssid);
+  EEPROM.writeString(200,pwd);
+  EEPROM.commit();  
+}
+
+//Function to restore original WIFI parameters...
+void restore_WIFI(){
+  String ssid_wifi = "NOWIFI";
+  char ssidwifi [7];
+  ssid_wifi.toCharArray(ssidwifi,7);
+  EEPROM.writeString(250,ssidwifi);  
+  EEPROM.commit();  
+}
+//Function to restart ESP...
+void restart_esp(int wait_before_restart){
+  delay(wait_before_restart) ;
+    ESP.restart();
+}
+
+//Function to generate HTTP 200 page answer...
+void http_return(AsyncWebServerRequest *request, String message){
+   request->send(200, "text/html", message);
+}
+
+//Function to start factory reset...
+void reset_parameters(){
+  Serial.println("Factory resset pressed!") ;
+  digitalWrite(led_reset,HIGH);
+  delay(5000) ;
+  if (digitalRead(factory_reset) == HIGH){
+   Serial.println("Start factory reset procedure......");
+   restore_AP(); // to reset AP settings
+   restore_WIFI(); // reset WIFI settings
+   for (int i =0;i<5;i++){
+    digitalWrite(led_reset,LOW);
+    delay(500);
+    digitalWrite(led_reset,HIGH);
+    delay(500);
+   }
+   Serial.println("ESP is restarting...");
+   digitalWrite(led_reset,LOW);
+   restart_esp(1000);
+  }
+  else if (digitalRead(factory_reset) == LOW){
+    Serial.println("Factory reset canceled...");
+    digitalWrite(led_reset, LOW);
+  }  
+}
+
+//Function to get temperature from probe DS18b20...
+void Get_TempAmb(){
+  //Serial.print(" Requesting temperatures from probes...") ;
+  DSsensors.requestTemperatures() ; // Send the command to get temperatures
+  //Serial.println("DONE") ;
+  ta = DSsensors.getTempCByIndex(0) ; 
+  Serial.println("Ambiant temperature *C : " + String(ta)) ; 
+}
+
+//Function to get soil temperature and humidity...
+void Get_SoilTempHum(){
+  ts = SoilSensor.readTemperature();
+  hs = SoilSensor.readHumidity();
+  if (! isnan(ts)) {  // check if 'is not a number'
+    Serial.print("Soil Temperature *C : "); 
+    Serial.println(ts);   
+  } else { 
+    Serial.println("Failed to read temperature");
+  }  
+  if (! isnan(hs)) {  // check if 'is not a number'
+    Serial.print("Soil Humidity % : "); 
+    Serial.println(hs);
+  } else { 
+    Serial.println("Failed to read humidity");
+  }
+}
+
+//Function to get light rate...
+void Get_LightRate(){
+  lr = analogRead(lightsensor_pin) ;
+  lr = (lr / 4095) * 100;
+  Serial.println("Light rate % : " + String(lr));
+}
+
+//Function to connect on MQTT server...
+void Connect_Mqtt(){
+  int i=0;
+  client.setServer(mqttServer, mqttPort);
+ 
+  while (!client.connected() && i<2) {
+    i++ ;
+    Serial.println("Connecting to MQTT..."); 
+    if (client.connect("ESP32Client", mqttUser, mqttPassword )) { 
+      Serial.println("connected");
+       digitalWrite(led_error,LOW); 
+    } else {
+ 
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+      
+      digitalWrite(led_error,HIGH);
+      delay(500);
+ 
+    }
+  }
+}
+
+//Function to load Mqtt config...
+void loadMqttConfig(){
+  Serial.println("loading MQTT configuration...");
+  mqttIni = SPIFFS.open(mqttIniFile, FILE_READ);
+  int i=0;
+  while(mqttIni.available()&& i<5)
+  {
+    if(i == 0){
+      mqttBroker = mqttIni.readStringUntil('\n');
+      mqttBroker.trim();    
+    i++;
+    }
+    else if (i == 1){
+      mqttTopics = mqttIni.readStringUntil('\n');
+      mqttTopics.trim();
+      i++;
+    }
+    else if (i == 2){
+      mqttLogin = mqttIni.readStringUntil('\n'); 
+      mqttLogin.trim();     
+      i++;
+    }
+    else if (i == 3){
+      mqttPass = mqttIni.readStringUntil('\n');
+      mqttPass.trim();
+      i++;
+    }
+    else if (i == 4){
+      sampleFreq = mqttIni.readStringUntil('\n');
+      sampleFreq.trim();
+      i++;
+    }
+  }
+mqttIni.close();
+//Serial.println("mqtt borker:" + mqttBroker);
+mqttServer = mqttBroker.c_str();
+//Serial.println("mqtt Topics:" + mqttTopics);
+mqttRegister = mqttTopics.c_str();
+//Serial.println("mqtt login:" + mqttLogin);
+mqttUser = mqttLogin.c_str();
+//Serial.println("mqtt password:" + mqttPass);
+mqttPassword = mqttPass.c_str(); 
+//Serial.println("Sample freq:" + sampleFreq + " second(s)"); 
+}  
+/********************** 
+ *  End of functions  *
+ **********************/
+
+/************************** 
+ *  ESP32 setup function  *
+ **************************/ 
+void setup(void)
+{
+//General setup...
+  Serial.begin(115200);//Intialize com port baud rate
+  EEPROM.begin(512); // Set size of the EEPROM to store parameters
+  pinMode(factory_reset, INPUT); //set input pin for factory reset BP  
+  pinMode(led_reset, OUTPUT); // set output pin for factory reset
+  pinMode(led_error, OUTPUT); // set output pin for errors
+  digitalWrite(led_reset, LOW);
+  digitalWrite(led_error, LOW);
+
+//Test if BP for factory_reset is pressed during 5 seconds...
+  if (digitalRead(factory_reset) == HIGH){
+    reset_parameters();
+  } 
+  
+// Initialize SPIFFS...
+  if(!SPIFFS.begin(true)){
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }  
+
+//Load MQTT configuration...
+  loadMqttConfig();
+
+//start Soil sensor...
+  while (!Serial)
+    delay(10);
+  Serial.println("SHT30 test");
+  if (! SoilSensor.begin(0x44)) {   // Set to 0x45 for alternate i2c addr
+    Serial.println("Couldn't find SHT30");
+    while (1) delay(1);
+  }
+
+//Collect measures from sensors...
+  Get_TempAmb();
+  Get_SoilTempHum(); 
+  Get_LightRate(); 
+
+//Create Acces Point...  
+  Setup_AP();
+
+//Connect on WIFI router with credentials stored in EEPROM...
+  Setup_WIFI();
+
+//Connect on MQTT server...
+if (WiFi.status() == WL_CONNECTED){
+  Connect_Mqtt();
+}
+else{
+  Serial.println("Cannot conected on MQTT server, WIFI connection down...");
+}
+
+        
+// Route for root / web page...
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(SPIFFS, "/index.html", String(), false,processor);
+  });
+  
+// Route for AP settings web page...
+  server.on("/APNetwork", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(SPIFFS, "/APNetwork.html", String(), false,ap_processor);
+  });
+
+// Route for Wifi settings web page...
+  server.on("/Wifi", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(SPIFFS, "/Wifi.html", String(), false,wifi_processor);
+  });
+
+// Route for MQTT settings web page...
+  server.on("/Mqtt", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(SPIFFS, "/Mqtt.html", String(), false,Mqtt_processor);
+  });
+  
+//Get AP password from AP settings page...
+  server.on("/AP_changepass", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String inputMessage;
+    String inputParam;
+    char ap_pwd [15];        
+    if (request->hasParam(PARAM_INPUT_1)) {
+      inputMessage = request->getParam(PARAM_INPUT_1)->value();
+      inputParam = PARAM_INPUT_1;
+      //write new password for AP in EEPROM...
+      inputMessage.toCharArray(ap_pwd,15) ;
+      EEPROM.writeString(200,ap_pwd);
+      EEPROM.commit();          
+    }
+    http_return(request,"New password changed successfully <br><b>Your device will restart in 10 seconds...</b><br><a href=\"/\">Return to Home Page</a>");
+    restart_esp(10000);
+    });
+
+//Get SSID from AP settings page...
+  server.on("/AP_changessid", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String inputMessage;
+    String inputParam;
+    char ap_ssid [15];        
+    if (request->hasParam(PARAM_INPUT_2)) {
+      inputMessage = request->getParam(PARAM_INPUT_2)->value();
+      inputParam = PARAM_INPUT_2;
+      //write ssid for AP in EEPROM...
+      inputMessage.toCharArray(ap_ssid,15) ;
+      EEPROM.writeString(100,ap_ssid);
+      EEPROM.commit();          
+    }
+    http_return(request, "SSID name for Access Point has changed successfully <br><b>Your device will restart in 10 seconds...</b><br><a href=\"/\">Return to Home Page</a>");
+    restart_esp(10000);
+    });
+
+//Get WIFI SSID and password from WIFI settings page...
+  server.on("/WIFI_change", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String inputMessage;
+    String inputParam;
+    char wifi_ssid [30];        
+    char wifi_pwd [24];
+    if (request->hasParam(PARAM_INPUT_3)) {
+      inputMessage = request->getParam(PARAM_INPUT_3)->value();
+      inputParam = PARAM_INPUT_3;     
+      //write WIFI ssid in EEPROM...
+      inputMessage.toCharArray(wifi_ssid,30) ;
+      EEPROM.writeString(250,wifi_ssid);
+      EEPROM.commit();          
+    }
+    if (request->hasParam(PARAM_INPUT_4)) {
+      inputMessage = request->getParam(PARAM_INPUT_4)->value();
+      inputParam = PARAM_INPUT_4;      
+      //write WIFI ssid in EEPROM...
+      inputMessage.toCharArray(wifi_pwd,24) ;
+      EEPROM.writeString(285,wifi_pwd);
+      EEPROM.commit();          
+    }
+    http_return(request,"WIFI settings has changed successfully <br><b>Your device will restart in 10 seconds...</b><br><a href=\"/\">Return to Home Page</a>");
+    restart_esp(10000);
+    });
+
+//Get MQTT broker from MQTT settings page...
+  server.on("/M_changebroker", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String inputMessage;
+    String inputParam;    
+    File myFile;
+    if (request->hasParam(PARAM_INPUT_5)) {
+      inputMessage = request->getParam(PARAM_INPUT_5)->value();
+      inputParam = PARAM_INPUT_5;     
+
+      myFile = SPIFFS.open(mqttIniFile, FILE_WRITE);
+      if (myFile.print(inputMessage + "\n" + mqttTopics + "\n" + mqttLogin + "\n" + mqttPass + "\n")){
+        Serial.println("Message successfully written");
+      }
+      else{
+        Serial.print("Writting message failled!!");
+      }
+      myFile.close();              
+    }
+
+    if (request->hasParam(PARAM_INPUT_6)) {
+      inputMessage = request->getParam(PARAM_INPUT_6)->value();
+      inputParam = PARAM_INPUT_6;     
+
+      myFile = SPIFFS.open(mqttIniFile, FILE_APPEND);
+      if (myFile.print(inputMessage + "\n")){
+        Serial.println("Message successfully written");
+      }
+      else{
+        Serial.print("Writting message failled!!");
+      }
+      myFile.close();              
+    }
+    
+    http_return(request,"MQTT settings has changed successfully <br><b>Your device will restart in 10 seconds...</b><br><a href=\"/\">Return to Home Page</a>");
+    restart_esp(10000);
+    });
+  
+  // Start web server
+  server.begin();
+}
+/********************************* 
+ *  End of ESP32 setup function  *
+ *********************************/ 
+
+/************** 
+ *  Main Loop *
+ **************/ 
+void loop(void)
+{   
+  //Get all measures from sensors...
+  Get_SoilTempHum();
+  Get_TempAmb();
+  Get_LightRate();
+  
+  //Test wifi connection...
+  if (WiFi.status() != WL_CONNECTED){
+      Serial.println("WIFI connection error!");
+      Setup_WIFI();
+      wifi_state = false;
+      
+    }
+  else if (WiFi.status() == WL_CONNECTED && wifi_state == false){
+    Serial.println("WIFI conectecion restored...");
+    Serial.println("Reconnect on MQTT server...");    
+    Connect_Mqtt();
+    wifi_state = true;
+  }
+
+  else if (WiFi.status() == WL_CONNECTED && wifi_state == true){
+   StaticJsonDocument<200> doc;  
+   doc["iot_id"] = "gcap01";
+   doc["mes_ta"] = ta;
+   doc["mes_ts"] = ts;
+   doc["mes_hs"] = hs;
+   doc["mes_lr"] = lr;  
+   char jsonBuffer[512];   
+   Connect_Mqtt();
+   Serial.println("Sending data to MQTT broker...");
+   serializeJson(doc, jsonBuffer); // print to client*/
+   if (client.publish(mqttRegister,jsonBuffer)== true){
+    digitalWrite(led_error,LOW);
+    Serial.println("data published...");     
+   }
+   else{
+    Serial.println("data publication error...");
+    digitalWrite(led_error,HIGH);
+    Connect_Mqtt();
+   }   
+   delay((sampleFreq.toInt()*1000)); 
+  }
+      
+}
