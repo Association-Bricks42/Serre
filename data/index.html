@@ -1,0 +1,46 @@
+<!DOCTYPE HTML><html>
+<head>
+  <title>TABLEAU DE BORD</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" type="text/css" href="all.css">
+  <link rel="icon" href="data:,">
+  <style>
+    html {font-family: Arial; display: inline-block; text-align: center;}
+    p {  font-size: 1.2rem;}
+    body {  margin: 0;}
+    .topnav { overflow: hidden; background-color: #2f4468; color: white; font-size: 1.7rem; }
+    .content { padding: 20px; }
+    .card { background-color: white; box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5); }
+    .cards { max-width: 700px; margin: 0 auto; display: grid; grid-gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .reading { font-size: 2.8rem; }
+    .packet { color: #bebebe; }
+    .card.temperature { color: #fd7e14; }
+    .card.humidity { color: #1b78e2; }
+  </style>
+</head>
+<body>
+  <div class="topnav">
+    <h3>BRICKS42 - Tableau de bord des capteurs</h3>
+  </div>
+  <div class="content">
+    <div class="cards">
+      <div class="card temperature">
+        <h4><i ></i>AMBIANT TEMPERATURE</h4><p><span class="reading"><span id="t1">%TA%</span> &deg;C</span></p>
+      </div>
+	<div class="card temperature">
+        <h4><i ></i>SOIL TEMPERATURE</h4><p><span class="reading"><span id="t1">%TS%</span> &deg;C</span></p>
+      </div>      
+	<div class="card humidity">
+        <h4><i ></i>SOIL HUMIDITY</h4><p><span class="reading"><span>%HS%</span> &percnt;</span></p>
+      </div>
+	<div class="card humidity">
+        <h4><i ></i>LIGHT RATE</h4><p><span class="reading"><span>%LR%</span> &percnt;</span></p>
+      </div>
+     
+    </div>
+  </div>
+<p><a href="/APNetwork">Access Point Settings</a></p>
+<p><a href="/Wifi">Wifi Settings</a></p>
+<p><a href="/Mqtt">MQTT Settings</a></p>
+</body>
+</html>

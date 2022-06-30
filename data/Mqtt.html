@@ -1,0 +1,40 @@
+<!DOCTYPE HTML><html>
+<head>
+  <title>Bricks42 Sensors MQTT SETTINGS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" type="text/css" href="all.css">
+  <link rel="icon" href="data:,">
+  <style>
+    html {font-family: Arial; display: inline-block; text-align: center;}
+    p {  font-size: 1.2rem;}
+    body {  margin: 0;}
+    .topnav { overflow: hidden; background-color: #2f4468; color: white; font-size: 1.7rem; }
+    .content { padding: 20px; }
+    .card { background-color: white; box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5); }
+    .cards { max-width: 700px; margin: 0 auto; display: grid; grid-gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .reading { font-size: 2.8rem; }
+    .packet { color: #bebebe; }
+    .card.temperature { color: #fd7e14; }
+    .card.humidity { color: #1b78e2; }
+  </style>
+</head>
+
+<body>
+  <div class="topnav">
+    <h3>Bricks42 Sensors MQTT Settings</h3>
+  </div>
+<p><a href="/"> Back to home</a></p>
+ 
+<p style="text-align:left"><b><u>Change MQTT Broker settings:</u></b></p>	
+<form action="/M_changebroker" method="get" style="text-align:left">
+    <p><label for="mqttname">New broker:</label>
+  <input type="text" id="MQTTBRK" name="M-BROKER" value=%MBROKER%></p>
+	<p><label for="sample">Sample frequency in seconds:</label>
+  <input type="text" id="MQTTSFREQ" name="S-FREQ" value=%SFREQ%></p>
+
+	<br><br>	
+  <input type="submit" value="Submit">
+</form>
+</body></html>
+
+
